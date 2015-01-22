@@ -1,0 +1,603 @@
+﻿local Lib = {};
+
+local TreeLib = require("tree");
+Lib.Tree = TreeLib.CreatePrintTree(print);
+
+local List= require("list");
+Lib.CreateList = List;
+
+local function ShowStack(szErrMsg)
+	print("LuaError: " .. szErrMsg);
+	print(debug.traceback());
+end
+
+-- 按照统一的格式回调函数
+function Lib.CallBack(tbCallBack)
+	local varFunc	= tbCallBack[1];
+	local szType	= type(varFunc);
+
+	assert(szType == "function");
+	
+	local function InnerCall()
+		return varFunc(unpack(tbCallBack, 2));
+	end
+	
+	local tbRet	= {xpcall(InnerCall, ShowStack)};
+	return unpack(tbRet);
+end;
+
+-- 获得一个32位数中指定位段(0~31)所表示的整数
+function Lib.LoadBits(nInt32, nBegin, nEnd)
+	if (nBegin > nEnd) then
+		local _ = nBegin;
+		nBegin = nEnd;
+		nEnd   = _;
+	end
+	if (nBegin < 0) or (nEnd >= 32) then
+		return 0;
+	end
+	nInt32 = nInt32 % (2 ^ (nEnd + 1));
+	nInt32 = nInt32 / (2 ^ nBegin);
+	return math.floor(nInt32);
+end
+
+-- 设置一个32位数中的指定位段(0~31)为指定整数
+function Lib.SetBits(nInt32, nBits, nBegin, nEnd)
+	if (nBegin > nEnd) then
+		nBegin, nEnd = nEnd, nBegin;
+	end
+	nBits = nBits % (2 ^ (nEnd - nBegin + 1));
+	nBits = nBits * (2 ^ nBegin);
+	nInt32 = nInt32 % (2 ^ nBegin) + nInt32 - nInt32 % (2 ^ (nEnd + 1));
+	nInt32 = nInt32 + nBits;
+	return nInt32;
+end
+
+-- 获取时差（秒数）
+function GetGMTSec()
+	if not _nGMTSec then
+		local nTime = os.time();
+		local tbUtcDate = os.date("!*t", nTime); 
+		local nUtcTime = os.time(tbUtcDate);
+
+		_nGMTSec = os.difftime(nTime, nUtcTime);
+		print("GetGMTSec", _nGMTSec / 3600);
+	end
+
+	return _nGMTSec;
+end
+
+-- 根据秒数（UTC，os.time()返回）计算当地时间今天已经过的秒数
+function Lib.GetLocalDayTime(nUtcSec)
+	local nLocalSec	= (nUtcSec or os.time()) + GetGMTSec();
+	return math.fmod(nLocalSec, 3600 * 24);
+end
+
+-- 根据秒数（UTC，os.time()返回）计算当地天数
+--	1970年1月1日 返回0
+--	1970年1月2日 返回1
+--	1970年1月3日 返回2
+--	……依此类推
+function Lib.GetLocalDay(nUtcSec)
+	local nLocalSec	= (nUtcSec or os.time()) + GetGMTSec();
+	return math.floor(nLocalSec / (3600 * 24));
+end
+
+-- 根据秒数（UTC，os.time()返回）计算当地周数
+--	1970年1月1日 星期四 返回0
+--	1970年1月4日 星期日 返回0
+--	1970年1月5日 星期一 返回1
+--	……依此类推
+function Lib.GetLocalWeek(nUtcSec)
+	local nLocalDay	= GetLocalDay(nUtcSec);
+	return math.floor((nLocalDay + 3) / 7);
+end
+
+-- 根据秒数（UTC，os.time()返回）计算当地月数
+--	1970年1月 返回0
+--	1970年2月 返回1
+--	1970年3月 返回2
+--	……依此类推
+function Lib.GetLocalMonth(nUtcSec)
+	local tbTime 	= os.date("*t", nUtcSec or os.time());
+	return (tbTime.year - 1970) * 12 + tbTime.month - 1;
+end
+
+-- 支持 
+--		2012-09-28 10:50:51 
+--		2012.09.28 10:50:51 
+--		2012-09-28
+--		2012.09.28
+function Lib.ParseDatetime(szDatetime)
+	local year, month, day, hour, minute, second = string.match(szDatetime, "(%d+)/(%d+)/(%d+) (%d+):(%d+):(%d+)");
+	if not year then
+		year, month, day, hour, minute, second = string.match(szDatetime, "(%d+)-(%d+)-(%d+) (%d+):(%d+):(%d+)");
+	end
+	
+	if not year then
+		year, month, day = string.match(szDatetime, "(%d+)/(%d+)/(%d+)");
+		hour, minute, second = 0, 0, 0;
+	end	
+	
+	if not year then
+		year, month, day = string.match(szDatetime, "(%d+)-(%d+)-(%d+)");
+		hour, minute, second = 0, 0, 0;
+	end	
+	
+	if not year then
+		Log("Datetime format does not support:" .. szDatetime);
+		return;
+	end
+			
+	return os.time({year = year, month = month, day = day, hour = hour, min = minute, sec = second});
+end
+
+tbCnNum =
+{
+	[1] 	= "一",
+	[2]	 	= "二",
+	[3]		= "三",
+	[4]		= "四",
+	[5] 	= "五",
+	[6]		= "六",
+	[7] 	= "七",
+	[8]		= "八",
+	[9] 	= "九",
+};
+
+tb4LenCnNum =
+{
+	[1]		= "",
+	[2]		= "十",
+	[3]		= "百",
+	[4]		= "千",
+};
+
+-- 功能:	把一个长度不超过4位的阿拉伯数字整数转化成为中文数字
+-- 参数:	nDigit, (0 <= nDigit) and (nDigit < 10000)
+-- 返回值:	中文数字
+function Lib.ransfer4LenDigit2CnNum(nDigit)	
+	local nDigitTmp	= nDigit;			-- 临时变量
+	local nModel	= 0;				-- nDigit中每一位数字的值
+	local nPreNum	= 0;				-- nDigit低一位数字的值
+	local bOneEver	= false;			-- 做标记,当前是否出现过不为0的值
+	local szCnNum	= "";				-- 保存中文数字的变量
+	local szNumTmp	= "";				-- 临时变量 
+
+	if (nDigit == 0) then
+		return;
+	end
+	
+	if (nDigit >= 10 and nDigit < 20) then
+		if (nDigit == 10) then
+			szCnNum = tb4LenCnNum[2];
+		else
+			szCnNum = tb4LenCnNum[2]..tbCnNum[math.floor(nDigit % 10)];
+		end
+		return szCnNum;
+	end
+
+	for i = 1, #tb4LenCnNum do
+		szNumTmp	= "";
+		nModel		= math.floor(nDigitTmp % 10);	-- 取得nDigit当前位上的值
+		if (nModel ~= 0) then
+			szNumTmp = szNumTmp..tbCnNum[nModel]..tb4LenCnNum[i];
+			if (nPreNum == 0 and bOneEver) then
+				szNumTmp = szNumTmp.."零";
+			end
+			bOneEver = true;
+		end
+		szCnNum	= szNumTmp..szCnNum;
+		
+		nPreNum	= nModel;
+		nDigitTmp	= math.floor(nDigitTmp / 10);
+		if (nDigitTmp == 0) then
+			break;
+		end
+	end
+	
+	return szCnNum;
+end
+
+function Lib.SplitStr(szStrConcat, szSep)
+	if (not szSep) then
+		szSep = ",";
+	end;
+	local tbStrElem = {};
+	
+	--特殊转义字符指定长度
+	local tbSpeSep = {
+		["%."] = 1;
+	};
+	
+	local nSepLen = tbSpeSep[szSep] or #szSep;
+	local nStart = 1;
+	local nAt = string.find(szStrConcat, szSep);
+	while nAt do
+		tbStrElem[#tbStrElem+1] = string.sub(szStrConcat, nStart, nAt - 1);
+		nStart = nAt + nSepLen;
+		nAt = string.find(szStrConcat, szSep, nStart);
+	end
+	tbStrElem[#tbStrElem+1] = string.sub(szStrConcat, nStart);
+	return tbStrElem;
+end
+
+function Lib.CreatEnumTable(tbEnumString, nStartIndex) 	
+    local tbEnum = {};    
+	nStartIndex	= nStartIndex or 0; 	
+    for i, v in ipairs(tbEnumString) do 
+        tbEnum[v] = nStartIndex + i - 1; 
+    end 
+    return tbEnum 
+end 
+
+function Lib.LiangBarskyAlgorithm(l,t,w,h, x1,y1,x2,y2)
+	local dx, dy = x2-x1, y2-y1
+	local t0, t1  = 0, 1
+	local p, q, r
+
+	for side = 1, 4 do
+		if side == 1 then 
+			p,q = -dx, x1 - l
+		elseif side == 2 then 
+			p,q =  dx, l + w - x1
+		elseif side == 3 then 
+			p,q = -dy, y1 - t
+		else
+			p,q =  dy, t + h - y1
+		end
+
+		if p == 0 then
+			if q < 0 then 
+				return nil 
+			end  -- Segment is parallel and outside the bbox
+		else
+			r = q / p
+			if p < 0 then
+				if r > t1 then 
+					return nil
+				elseif r > t0 then 
+					t0 = r
+				end		
+			else -- p > 0
+				if r < t0 then 
+					return nil
+				elseif r < t1 then 
+					t1 = r
+				end
+			end
+		end
+	end
+
+	local ix1, iy1, ix2, iy2 = x1 + t0 * dx, y1 + t0 * dy, x1 + t1 * dx, y1 + t1 * dy
+	if ix1 == ix2 and iy1 == iy2 then 
+		return ix1, iy1 
+	end
+	return ix1, iy1, ix2, iy2
+end
+
+function Lib.StrIsNilOrEmpty(str)
+	return str == nil or str == "";
+end
+
+function Lib.CopyTB(tb)
+	local tbCopy	= {};
+	for k, v in pairs(tb) do
+		if type(v) == "table" then
+			tbCopy[k]	= Lib.CopyTB(v);
+		else
+			tbCopy[k]	= v;
+		end
+	end;
+	return tbCopy;
+end
+
+function Lib.CountTB(tb)
+	local count = 0;
+	for k, v in pairs(tb) do
+		count = count + 1;
+	end
+	return count;
+end
+
+function Lib.LeftTimeToString(nTime) -- 剩余时间，解决 os.date("%H:%M:%S", cd) 的时区问题
+	if nTime <= 0 then
+		return "00:00";
+	end
+
+    local nHour = math.floor(nTime / 3600);
+    local nMin = math.floor((nTime % 3600) / 60);
+    local nSec = math.floor(nTime % 60);
+
+    if nHour == 0 then
+    	return string.format("%02d:%02d", nMin, nSec);
+    end
+    return string.format("%d:%02d:%02d", nHour, nMin, nSec);
+end
+
+function Lib.SecChangeTime(nTime)
+	if nTime <= 0 then
+		return 0, 0, 0;
+	end
+
+    local nHour = math.floor(nTime / 3600);
+    local nMin = math.floor((nTime % 3600) / 60);
+    local nSec = math.floor(nTime % 60);
+
+    return nHour, nMin, nSec;
+end
+
+-- 模式替换tab数据中的某些列
+function Lib.TabSub(tab, tbSubSetting)
+	for name, subber in pairs(tbSubSetting) do
+		if type(subber) == "string" then
+			local pattern = subber;
+			subber = function(str)
+				if not str then
+					return nil;
+				end
+				local result = {};
+				for w in string.gmatch(str, pattern) do
+					table.insert(result, tonumber(w) or w);
+				end
+				return result;
+			end
+		end
+		for k,v in pairs(tab) do
+			v[name] = subber(v[name]);
+		end
+	end
+end
+
+function Lib.ParsePlistPath(fileName)
+	return string.match(fileName, "(.+%.plist)/(.+)");
+end
+
+-- 去除指定字符串首尾指定字符
+function Lib.StrTrim(szDes, szTrimChar)
+	if (not szTrimChar) then
+		szTrimChar = " ";
+	end
+	
+	if (string.len(szTrimChar) ~= 1) then
+		return szDes;
+	end
+	
+	local szRet, nCount = string.gsub(szDes, "("..szTrimChar.."*)([^"..szTrimChar.."]*.*[^"..szTrimChar.."])("..szTrimChar.."*)", "%2");
+	if (nCount == 0) then
+		return "";
+	end
+	
+	return szRet;
+end
+
+local function StrVal2Str(szVal)
+	szVal	= string.gsub(szVal, "\\", "\\\\");
+	szVal	= string.gsub(szVal, '"', '\\"');
+	szVal	= string.gsub(szVal, "\n", "\\n");
+	szVal	= string.gsub(szVal, "\r", "\\r");
+	--szVal	= string.format("%q", szVal);
+	return '"'..szVal..'"';
+end;
+
+function Lib.Val2Str(var, szBlank)
+	local szType	= type(var);
+	if (szType == "nil") then
+		return "nil";
+	elseif (szType == "number") then
+		return tostring(var);
+	elseif (szType == "string") then
+		return StrVal2Str(var);
+	elseif (szType == "function") then
+		local szCode	= string.dump(var);
+		local arByte	= {string.byte(szCode, i, #szCode)};
+		szCode	= "";
+		for i = 1, #arByte do
+			szCode	= szCode..'\\'..arByte[i];
+		end;
+		return 'loadstring("' .. szCode .. '")';
+	elseif (szType == "table") then
+		if not szBlank then
+			szBlank	= "";
+		end;
+		local szTbBlank	= szBlank .. "  ";
+		local szCode	= "";
+		for k, v in pairs(var) do
+			local szPair	= szTbBlank.."[" .. Lib.Val2Str(k) .. "]	= " .. Lib.Val2Str(v, szTbBlank) .. ",\n";
+			szCode	= szCode .. szPair;
+		end;
+		if (szCode == "") then
+			return "{}";
+		else
+			return "\n"..szBlank.."{\n"..szCode..szBlank.."}";
+		end;
+	elseif szType == "boolean" then
+		return var and "true" or "false";
+	else	--if (szType == "userdata") then
+		return '"' .. tostring(var) .. '"';
+	end;
+end;
+
+function Lib.Str2Val(szVal)
+	return assert(loadstring("return "..szVal))();
+end;
+
+-- 合并2个表，用于下标默认的表
+function Lib.MergeTable(tableA, tableB)
+	for _, item in ipairs(tableB) do
+		tableA[#tableA + 1] = item;
+	end
+	
+	return tableA;
+end;
+
+-- 将传进来的table的数据随机打乱
+function Lib.RandomTable(tb)
+	if #tb <= 1 then
+		return tb;
+	end
+	
+	local i = #tb;
+	repeat
+		local n = Random(1, i);
+		local temp = tb[i];
+		tb[i] = tb[n];
+		tb[n] = temp;
+		i = i - 1;
+	until i == 0
+
+	return tb;
+end
+
+function Lib.DiffTable(src, dst)
+	local diff = {};
+	local existKey = {};
+
+	for key, value in pairs(dst) do
+		local srcValue = src[key];
+		if srcValue ~= nil then
+			existKey[key] = true;
+			if value ~= srcValue then
+				if type(srcValue) == "table" and type(value) == "table" then
+					local subDiff = DiffTable(srcValue, value);
+					if #subDiff > 0 then
+						table.insert(diff, {true, key, subDiff});
+					end
+				else
+					table.insert(diff, {false, key, value});
+				end
+			end
+		else
+			table.insert(diff, {false, key, value});		
+		end
+	end
+
+	for key, value in pairs(src) do
+		if not existKey[key] then
+			table.insert(diff, {false, key}); -- Add一个nil值
+		end
+	end
+	return diff;
+end
+
+function Lib.MergeTableDiff(src, diff)
+	for _, v in pairs(diff) do
+		local diffFlag, key, value = unpack(v);
+
+		if diffFlag then
+			MergeTableDiff(src[key], value)
+		else
+			src[key] = value;
+		end
+	end 
+end
+
+local function Utf8CharBytes(s, i)
+   -- argument defaults
+   i = i or 1
+   local c = string.byte(s, i)
+   
+   -- determine bytes needed for character, based on RFC 3629
+   if c > 0 and c <= 127 then
+      -- UTF8-1
+      return 1
+   elseif c >= 194 and c <= 223 then
+      -- UTF8-2
+      local c2 = string.byte(s, i + 1)
+      return 2
+   elseif c >= 224 and c <= 239 then
+      -- UTF8-3
+      local c2 = s:byte(i + 1)
+      local c3 = s:byte(i + 2)
+      return 3
+   elseif c >= 240 and c <= 244 then
+      -- UTF8-4
+      local c2 = s:byte(i + 1)
+      local c3 = s:byte(i + 2)
+      local c4 = s:byte(i + 3)
+      return 4
+   end
+end
+
+-- returns the number of characters in a UTF-8 string
+function Lib.Utf8Len(s)
+   local pos = 1
+   local bytes = string.len(s)
+   local len = 0
+   
+   while pos <= bytes and len ~= chars do
+      local c = string.byte(s,pos)
+      len = len + 1
+      
+      pos = pos + Utf8CharBytes(s, pos)
+   end
+   
+   if chars ~= nil then
+      return pos - 1
+   end
+   
+   return len
+end
+
+-- functions identically to string.sub except that i and j are UTF-8 characters
+-- instead of bytes
+function Lib.Utf8Sub(s, i, j)
+   j = j or -1
+
+   if i == nil then
+      return ""
+   end
+   
+   local pos = 1
+   local bytes = string.len(s)
+   local len = 0
+
+   -- only set l if i or j is negative
+   local l = (i >= 0 and j >= 0) or Utf8Len(s)
+   local startChar = (i >= 0) and i or l + i + 1
+   local endChar = (j >= 0) and j or l + j + 1
+
+   -- can't have start before end!
+   if startChar > endChar then
+      return ""
+   end
+   
+   -- byte offsets to pass to string.sub
+   local startByte, endByte = 1, bytes
+   
+   while pos <= bytes do
+      len = len + 1
+      
+      if len == startChar then
+	 startByte = pos
+      end
+      
+      pos = pos + Utf8CharBytes(s, pos)
+      
+      if len == endChar then
+	 endByte = pos - 1
+	 break
+      end
+   end
+   
+   return string.sub(s, startByte, endByte)
+end
+
+-- replace UTF-8 characters based on a mapping table
+function Lib.Utf8Replace(s, mapping)
+   local pos = 1
+   local bytes = string.len(s)
+   local charbytes
+   local newstr = ""
+
+   while pos <= bytes do
+      charbytes = Utf8CharBytes(s, pos)
+      local c = string.sub(s, pos, pos + charbytes - 1)
+      newstr = newstr .. (mapping[c] or c)
+      pos = pos + charbytes
+   end
+
+   return newstr
+end
+
+return Lib;

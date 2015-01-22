@@ -1,0 +1,26 @@
+﻿local Lib = require("lib");
+local GameObject = luanet.import_type("UnityEngine.GameObject");
+local Behaviour = {};
+
+function Behaviour.Start(gameObject)
+	print("unity lua do main file\t", gameObject.name);
+
+	local tb = {a = 8, b = {ss = 5}};
+	Lib.Tree(tb);
+
+	local name = "Test";
+	local test = GameObject(name);
+	local getTest = GameObject.Find(name);
+
+	assert(test == getTest);
+
+	local callbackTest = test:AddComponent("CallbackTest");
+	callbackTest.OnStart = function (gameObject)
+		print("callback sucess!");
+		return gameObject.Name == name;
+	end
+
+	return true, "acai", "fk liuzhibiao"
+end
+
+return Behaviour;

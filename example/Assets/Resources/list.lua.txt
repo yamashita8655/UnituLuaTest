@@ -1,0 +1,139 @@
+﻿
+local function push_back(self, var)
+    self.count = self.count + 1;
+
+    if not self.head then
+        self.head = {value = var};
+        self.tail = self.head;
+        return;
+    end
+
+    local node = {value = var, left = self.tail };
+    self.tail.right = node;
+    self.tail = node;
+end
+
+local function push_front(self, var)
+    self.count = self.count + 1;
+
+    if not self.head then
+        self.head = {value = var};
+        self.tail = self.head;
+        return;
+    end
+
+    local node = {value = var, right = self.head };
+    self.head.left = node;
+    self.head = node;
+end
+
+local function pop_front(self)
+    if not self.head then
+      return nil;
+    end
+
+    local node = self.head;
+
+    self.head = node.right;
+
+    if self.head then
+        self.head.left = nil;
+    else
+        self.tail = nil;
+    end
+
+    self.count = self.count - 1;
+
+    return node.value;
+end
+
+local function pop_back(self)
+    if not self.tail then
+        return nil;
+    end
+
+    local node = self.tail;
+
+    self.tail = node.left;
+
+    if self.tail then
+        self.tail.right = nil;
+    else
+        self.head = nil;
+    end
+
+    self.count = self.count - 1;
+
+    return node.value;
+end
+
+local function front(self)
+    if not self.head then
+        return nil;
+    end
+    return self.head.value;
+end
+
+local function back(self)
+    if not self.tail then
+        return nil;
+    end
+    return self.tail.value;
+end
+
+local function traverse(self, func)
+    local node = self.head;
+    while node do
+        local bRet = func(node.value);
+        if not bRet then
+            break;
+        end
+        node = node.right;
+    end
+end
+
+local function remove_if(self, func)
+    local node = self.head;
+    while node do
+        local bRet = func(node.value);
+
+        if bRet then
+
+            if node.left then
+                node.left.right = node.right;
+            else
+                self.head = node.right;
+            end
+
+            if node.right then
+                node.right.left = node.left;
+            else
+                self.tail = node.left;
+            end
+
+            self.count = self.count - 1;
+        end
+
+        node = node.right;
+    end
+end
+
+local function size(self)
+    return self.count;
+end
+
+function new()
+    local list = {count = 0};
+    list.push_back = push_back;
+    list.push_front = push_front;
+    list.pop_back = pop_back;
+    list.pop_front = pop_front;
+    list.back = back;
+    list.front = front;
+    list.size = size;
+    list.traverse = traverse;
+    list.remove_if = remove_if;
+    return list;
+end
+
+return new;
